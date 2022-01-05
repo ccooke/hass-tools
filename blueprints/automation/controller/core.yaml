@@ -67,6 +67,13 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
+    inhibit:
+      name: (Optional) Light inhibit toggle
+      description: An input boolean that can turn off motion sensors and darken an area until manually disabled
+      default: {}
+      selector:
+        entity:
+          domain: input_boolean
 
 mode: queued
 variables:
@@ -111,6 +118,9 @@ variables:
       {% endif %}
     {% endif %}
 
+  inhibit: !input 'inhibit'
+  inhibit_present: '{{ inhibit|count > 0 }}'
+
 trigger:
   - id: motion_sensors
     platform: state
@@ -121,6 +131,10 @@ trigger:
   - id: motion_sensors
     platform: state
     entity_id: !input 'motion3'
+  - id: inhibit
+    platform: state
+    entity_id: !input 'inhibit'
+    to:
   - id: timer
     platform: event
     event_type: timer.finished
@@ -166,6 +180,15 @@ action:
       - conditions:
         - '{{ trigger.event.data.turn_on == true }}'
         sequence:
+        - choose:
+          - conditions:
+            - '{{ inhibit_present }}'
+            - '{{ states(inhibit) == ''on'' }}'
+            sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: !input 'inhibit'
+
         - choose:
           - conditions:
             - '{{ lights_on == false }}'
@@ -235,6 +258,10 @@ action:
     sequence:
     - choose:
       - conditions:
+        - '{{ inhibit_present }}'
+        - '{{ states(inhibit) == ''on'' }}'
+        sequence: []
+      - conditions:
         - '{{ trigger.to_state.state == ''on'' }}'
         sequence:
         - event: section-controller
@@ -260,4 +287,12 @@ action:
         turn_off: true
         duration: 10
 
+  - conditions:
+    - '{{ trigger.id == ''inhibit'' }}'
+    - '{{ trigger.to_state.state == ''on'' }}'
+    sequence:
+    - event: section-controller
+      event_data:
+        id: '{{ this.entity_id }}'
+        turn_off: true
 
