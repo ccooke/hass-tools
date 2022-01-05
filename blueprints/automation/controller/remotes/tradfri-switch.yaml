@@ -1,0 +1,107 @@
+blueprint:
+  name: section-controller-remote-zha-tradfri-onoff
+  source_url: https://github.com/ccooke/hass-tools/blueprints/automation/sector-control/remotes/zha-tradfri-onoff.yaml
+  description: |
+    Send commands to a section-controller-core blueprint
+  domain: automation
+
+  input:
+    id:
+      name: Automation ID
+      description: The entity ID of the section-controller automation to send to
+      selector:
+        entity:
+          domain: automation
+    remote:
+      name: Remote
+      description: The remote to send commands
+      selector:
+        device:
+          integration: zha
+          manufacturer: IKEA of Sweden
+          model: TRADFRI on/off switch
+
+mode: restart
+variables:
+  automation_id: !input 'id'
+
+trigger:
+- platform: event
+  event_type: zha_event
+  event_data:
+    device_id: !input 'remote'
+
+action:
+- variables:
+    command: '{{ trigger.event.data.command }}'
+    cluster_id: '{{ trigger.event.data.cluster_id }}'
+    endpoint_id: '{{ trigger.event.data.endpoint_id }}'
+- choose:
+
+  - conditions:
+    - '{{ command == ''on'' }}'
+    - '{{ cluster_id == 6 }}'
+    - '{{ endpoint_id == 1 }}'
+    sequence:
+    - event: section-controller
+      event_data:
+        id: '{{ automation_id }}'
+        turn_on: true
+        check_timer: true
+
+  - conditions:
+    - '{{ command == ''off'' }}'
+    - '{{ cluster_id == 6 }}'
+    - '{{ endpoint_id == 1 }}'
+    sequence:
+    - event: section-controller
+      event_data:
+        id: '{{ automation_id }}'
+        turn_off: true
+
+  - conditions:
+    - '{{ command == ''move_with_on_off'' }}'
+    - '{{ cluster_id == 8 }}'
+    - '{{ endpoint_id == 1 }}'
+    sequence:
+    - repeat:
+        while:
+        - condition: template
+          value_template: '{{ repeat.index < 10 }}'
+        sequence:
+        - event: section-controller
+          event_data:
+            id: '{{ automation_id }}'
+            step_brightness_pct: 10
+        - delay: 0.2
+    - event: section-controller
+      event_data:
+        id: '{{ this.entity_id }}'
+        check_timer: true
+
+  - conditions:
+    - '{{ command == ''move'' }}'
+    - '{{ cluster_id == 8 }}'
+    - '{{ endpoint_id == 1 }}'
+    sequence:
+    - repeat:
+        while:
+        - condition: template
+          value_template: '{{ repeat.index < 10 }}'
+        sequence:
+        - event: section-controller
+          event_data:
+            id: '{{ automation_id }}'
+            step_brightness_pct: -10
+        - delay: 0.2
+
+  - conditions:
+    - '{{ command == ''stop'' }}'
+    - '{{ cluster_id == 8 }}'
+    - '{{ endpoint_id == 1 }}'
+    sequence:
+    - event: section-controller
+      event_data:
+        id: '{{ automation_id }}'
+        turn_on: true
+        check_timer: true

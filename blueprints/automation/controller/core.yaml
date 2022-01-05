@@ -1,0 +1,263 @@
+blueprint:
+  name: section-controller-core
+  source_url: https://github.com/ccooke/hass-tools/blueprints/automation/sector-control/core.yaml
+  description: |
+    A universal controller for lights and devices.
+    
+    Features -
+      * Triggers on and respects the state of any number of motion sensors
+      * Understands two base levels of light (normal and bright)
+      * Timed off using a Timer helper (for better visibility and control)
+      * Can be controlled by multiple remotes (using the secion-controller-remote blueprint)
+
+    Todo -
+      * Light-level detection
+
+  domain: automation
+  input:
+    main_lights:
+      name: Lights
+      description: The main set of lights to control
+      selector:
+        target:
+          entity:
+            domain: light
+    bright_lights:
+      name: Bright Lights
+      description: Additional lights to turn on in "Bright" mode
+      default: {}
+      selector:
+        target:
+          entity:
+            domain: light
+    lights_on_time:
+      name: Lights on time
+      description: How long to keep the lights on when presence is not detected
+      default: 3600
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: seconds
+    timer:
+      name: Timer
+      description: A timer to control when the lights turn off
+      default: {}
+      selector:
+        entity:
+          domain: timer
+    motion1:
+      name: (Optional) Presence sensor
+      description: A sensor that indicates the area is occupied
+      default: {}
+      selector:
+        entity:
+          domain: binary_sensor
+    motion2:
+      name: (Optional) Presence sensor
+      description: A sensor that indicates the area is occupied
+      default: {}
+      selector:
+        entity:
+          domain: binary_sensor
+    motion3:
+      name: (Optional) Presence sensor
+      description: A sensor that indicates the area is occupied
+      default: {}
+      selector:
+        entity:
+          domain: binary_sensor
+
+mode: queued
+variables:
+  motion_sensors:
+    - !input 'motion1'
+    - !input 'motion2'
+    - !input 'motion3'
+
+  lights: !input 'main_lights'
+  light_devs: >-
+    {% if 'area_id' in lights %}
+      {{ area_entities(lights.area_id) | select('match', '^light\.') }}
+    {% elif 'entity_id' in lights %}
+      {% if lights.entity_id is string %}
+        {{ [ lights.entity_id ] }}
+      {% else %}
+        {{ lights.entity_id }}
+      {% endif %}
+    {% elif 'device_id' in lights %}
+      {% if lights.device_id is string %}
+        {{ [ device_entities(lights.device_id) ] }}
+      {% else %}
+        {{ lights.device_id | map('device_entities') }}
+      {% endif %}
+    {% endif %}
+
+  brights: !input 'bright_lights'
+  bright_devs: >-
+    {% if 'area_id' in brights %}
+      {{ area_entities(brights.area_id) | select('match', '^light\.') }}
+    {% elif 'entity_id' in brights %}
+      {% if brights.entity_id is string %}
+        {{ [ brights.entity_id ] }}
+      {% else %}
+        {{ brights.entity_id }}
+      {% endif %}
+    {% elif 'device_id' in brights %}
+      {% if brights.device_id is string %}
+        {{ [ device_entities(brights.device_id) ] }}
+      {% else %}
+        {{ brights.device_id | map('device_entities') | map('first') | list}}
+      {% endif %}
+    {% endif %}
+
+trigger:
+  - id: motion_sensors
+    platform: state
+    entity_id: !input 'motion1'
+  - id: motion_sensors
+    platform: state
+    entity_id: !input 'motion2'
+  - id: motion_sensors
+    platform: state
+    entity_id: !input 'motion3'
+  - id: timer
+    platform: event
+    event_type: timer.finished
+    event_data:
+      entity_id: !input 'timer'
+  - id: command
+    platform: event
+    event_type: section-controller
+    event_data:
+      id: '{{ this.entity_id }}'
+    
+action:
+- choose:
+  - conditions:
+    - '{{ trigger.id == ''command'' }}'
+    sequence:
+    - variables:
+        sensors: >-
+          {% set found = namespace(on=0) %}
+          {% for sensor in motion_sensors if sensor|count > 0 %}
+            {% if states(sensor) == 'on' %}
+              {% set found.on = found.on + 1 %}
+            {% endif %}
+          {% endfor %}
+          {{ found.on }}
+        brights_on: >-
+          {% set found = namespace(on=0) %}
+          {% for sensor in bright_devs %}
+            {% if states(sensor) == 'on' %}
+              {% set found.on = found.on + 1 %}
+            {% endif %}
+          {% endfor %}
+          {{ found.on > 0 }}
+        lights_on: >-
+          {% set found = namespace(on=0) %}
+          {% for sensor in light_devs %}
+            {% if states(sensor) == 'on' %}
+              {% set found.on = found.on + 1 %}
+            {% endif %}
+          {% endfor %}
+          {{ found.on > 0 }}
+    - choose:
+      - conditions:
+        - '{{ trigger.event.data.turn_on == true }}'
+        sequence:
+        - choose:
+          - conditions:
+            - '{{ lights_on == false }}'
+            sequence:
+            - service: light.turn_on
+              target: !input 'main_lights'
+              data:
+                transition: 0.2
+                brightness_pct: 100
+          - conditions:
+            - '{{ trigger.event.data.main_only == true }}'
+            sequence: []
+          - conditions:
+            - '{{ bright_devs|count == 0 }}'
+            sequence: []
+          - conditions:
+            - '{{ brights_on == false }}'
+            sequence:
+            - service: light.turn_on
+              target: !input 'bright_lights'
+              data:
+                transition: 0.2
+                brightness_pct: 100
+          - conditions:
+            - '{{ brights_on == true }}'
+            sequence:
+            - service: light.turn_off
+              target: !input 'bright_lights'
+              data:
+                transition: 0.2
+    - choose:
+      - conditions:
+        - '{{ trigger.event.data.check_timer == true }}'
+        sequence:
+        - service: timer.start
+          target:
+            entity_id: !input 'timer'
+          data:
+            duration: !input 'lights_on_time'
+        - choose:
+          - conditions:
+            - '{{ sensors > 0 }}'
+            sequence:
+            - service: timer.pause
+              target:
+                entity_id: !input 'timer'
+
+    - choose:
+      - conditions:
+        - '{{ trigger.event.data.turn_off == true }}'
+        sequence:
+        - choose:
+          - conditions:
+            - '{{ bright_devs|count > 0 }}'
+            sequence:
+            - service: light.turn_off
+              target: !input 'bright_lights'
+              data:
+                transition: '{{ trigger.event.data.duration | default(0.2) }}'
+        - service: light.turn_off
+          target: !input 'main_lights'
+          data:
+            transition: '{{ trigger.event.data.duration | default(0.2) }}'
+
+  - conditions:
+    - '{{ trigger.id == ''motion_sensors'' }}'
+    sequence:
+    - choose:
+      - conditions:
+        - '{{ trigger.to_state.state == ''on'' }}'
+        sequence:
+        - event: section-controller
+          event_data:
+            id: '{{ this.entity_id }}'
+            turn_on: true
+            check_timer: true
+            main_only: true
+      - conditions:
+        - '{{ trigger.to_state.state == ''off'' }}'
+        sequence:
+        - event: section-controller
+          event_data:
+            id: '{{ this.entity_id }}'
+            check_timer: true
+
+  - conditions:
+    - '{{ trigger.id == ''timer'' }}'
+    sequence:
+    - event: section-controller
+      event_data:
+        id: '{{ this.entity_id }}'
+        turn_off: true
+        duration: 10
+
+
