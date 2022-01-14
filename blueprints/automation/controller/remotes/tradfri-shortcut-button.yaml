@@ -1,0 +1,99 @@
+blueprint:
+  name: section-controller-remote-zha-tradfri-shortcut-button
+  domain: automation
+  source_url: https://github.com/ccooke/hass-tools/blueprints/automation/sector-control/remotes/tradfri-shortcut-button.yaml.yaml
+  description: |
+    Send commands to a section-controller-core blueprint
+
+  input:
+    id:
+      name: Automation ID
+      description: The entity ID of the section-controller automation to send to
+      selector:
+        entity:
+          domain: automation
+    remote:
+      name: Remote
+      description: The shortcut button to use
+      selector:
+        device:
+          integration: zha
+          manufacturer: IKEA of Sweden
+          model: TRADFRI SHORTCUT Button
+
+mode: restart
+max_exceeded: silent
+variables:
+  automation_id: !input 'id'
+  
+trigger:
+- platform: event
+  event_type: zha_event
+  event_data:
+    device_id: !input 'remote'
+
+action:
+- variables:
+    command: '{{ trigger.event.data.command }}'
+    cluster_id: '{{ trigger.event.data.cluster_id }}'
+    endpoint_id: '{{ trigger.event.data.endpoint_id }}'
+    args: '{{ trigger.event.data.args }}'
+      
+- choose:
+  - conditions:
+    - '{{ command == ''on'' }}'
+    - '{{ cluster_id == 6 }}'
+    - '{{ endpoint_id == 1 }}'
+    sequence:
+    - wait_for_trigger:
+      - platform: event
+        event_type: zha_event
+        event_data:
+          device_id: !input 'remote'
+          command: 'on'
+          cluster_id: 6
+          endpoint_id: 1
+      timeout:
+        milliseconds: 600
+      continue_on_timeout: true
+
+    - choose:
+      - conditions:
+        - condition: template
+          value_template: '{{ not wait.trigger }}'
+        sequence:
+        - event: section-controller
+          event_data:
+            id: '{{ automation_id }}'
+            toggle: true
+            check_timer: true
+
+      default:
+      - event: section-controller
+        event_data:
+          id: '{{ automation_id }}'
+          turn_on: true
+          brights_on: true
+          check_timer: true
+
+  - conditions:
+    - '{{ endpoint_id == 1 }}'
+    - '{{ cluster_id == 8 }}'
+    - '{{ command == ''move_with_on_off'' }}'
+    sequence:
+    - event: section-controller
+      event_data:
+        id: '{{ automation_id }}'
+        turn_off: true
+        check_timer: true
+
+    - wait_for_trigger:
+      - platform: event
+        event_type: zha_event
+        event_data:
+          device_id: !input 'remote'
+          endpoint_id: 1
+          cluster_id: 8
+          command: stop
+      timeout:
+        seconds: 10

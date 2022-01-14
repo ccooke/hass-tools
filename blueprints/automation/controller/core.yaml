@@ -176,9 +176,22 @@ action:
             {% endif %}
           {% endfor %}
           {{ found.on > 0 }}
+    - variables:
+        turn_on: >-
+          {% if trigger.event.data.toggle|default(false) %}
+            {{ not lights_on }}
+          {% else %}
+            {{ trigger.event.data.turn_on|default(false) }}
+          {% endif %}
+        turn_off: >-
+          {% if trigger.event.data.toggle|default(false) %}
+            {{ lights_on }}
+          {% else %}
+            {{ trigger.event.data.turn_off|default(false) }}
+          {% endif %}
     - choose:
       - conditions:
-        - '{{ trigger.event.data.turn_on == true }}'
+        - '{{ turn_on }}'
         sequence:
         - choose:
           - conditions:
@@ -191,6 +204,21 @@ action:
 
         - choose:
           - conditions:
+            - '{{ trigger.event.data.brights_on | default(false) }}'
+            - '{{ bright_devs|count > 0 }}'
+            sequence:
+            - service: light.turn_on
+              target: !input 'main_lights'
+              data:
+                transition: 0.2
+                brightness_pct: 100
+            - service: light.turn_on
+              target: !input 'bright_lights'
+              data:
+                transition: 0.2
+                brightness_pct: 100
+
+          - conditions:
             - '{{ lights_on == false }}'
             sequence:
             - service: light.turn_on
@@ -198,12 +226,15 @@ action:
               data:
                 transition: 0.2
                 brightness_pct: 100
+
           - conditions:
             - '{{ trigger.event.data.main_only == true }}'
             sequence: []
+
           - conditions:
             - '{{ bright_devs|count == 0 }}'
             sequence: []
+
           - conditions:
             - '{{ brights_on == false }}'
             sequence:
@@ -212,6 +243,7 @@ action:
               data:
                 transition: 0.2
                 brightness_pct: 100
+
           - conditions:
             - '{{ brights_on == true }}'
             sequence:
@@ -221,7 +253,7 @@ action:
                 transition: 0.2
     - choose:
       - conditions:
-        - '{{ trigger.event.data.check_timer == true }}'
+        - '{{ trigger.event.data.check_timer }}'
         sequence:
         - service: timer.start
           target:
@@ -238,7 +270,7 @@ action:
 
     - choose:
       - conditions:
-        - '{{ trigger.event.data.turn_off == true }}'
+        - '{{ turn_off }}'
         sequence:
         - choose:
           - conditions:
